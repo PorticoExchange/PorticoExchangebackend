@@ -61,7 +61,7 @@
     "bip32": "^2.0.6",
     "bip39": "^3.0.4",
     "bitcoinjs-lib": "^5.2.0",
-    "boltz-core": "^0.4.1",
+    "boltz-core": "^0.5.0",
     "cors": "^2.8.5",
     "cross-os": "^1.4.0",
     "discord.js": "^12.5.3",
