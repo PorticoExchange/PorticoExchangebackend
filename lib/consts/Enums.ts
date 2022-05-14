@@ -6,16 +6,69 @@ export enum ErrorCodePrefix {
   Chain = 4,
   Lnd = 5,
   Swap = 6,
+  Rates = 7,
+  Backup = 8,
+  Ethereum = 9,
 }
 
-export enum Symbol {
-  BTC = 'BTC',
-  LTC = 'LTC',
+export enum ClientStatus {
+  Disconnected,
+  Connected,
+  OutOfSync,
 }
 
-export enum Chain {
-  BTC = 'bitcoin',
-  LTC = 'litecoin',
+export enum OrderSide {
+  BUY,
+  SELL,
+}
+
+export enum SwapUpdateEvent {
+  SwapCreated = 'swap.created',
+  SwapExpired = 'swap.expired',
+
+  ChannelCreated = 'channel.created',
+
+  InvoiceSet = 'invoice.set',
+  InvoicePaid = 'invoice.paid',
+  InvoicePending = 'invoice.pending',
+  InvoiceSettled = 'invoice.settled',
+  InvoiceFailedToPay = 'invoice.failedToPay',
+
+  // When an onchain transaction:
+  // - cannot be sent from the backend
+  // - of the user is rejected by the backend
+  TransactionFailed = 'transaction.failed',
+
+  TransactionMempool = 'transaction.mempool',
+  TransactionClaimed = 'transaction.claimed',
+  TransactionRefunded = 'transaction.refunded',
+  TransactionConfirmed = 'transaction.confirmed',
+  TransactionLockupFailed = 'transaction.lockupFailed',
+  TransactionZeroConfRejected = 'transaction.zeroconf.rejected',
+
+  // Events for the prepay miner fee Reverse Swap protocol
+  MinerFeePaid = 'minerfee.paid',
+  InvoiceExpired = 'invoice.expired',
+}
+
+export enum ChannelCreationType {
+  Auto = 'auto',
+  Create = 'create',
+}
+
+export enum ChannelCreationStatus {
+  Attempted = 'attempted',
+  Created = 'created',
+  Settled = 'settled',
+  Abandoned = 'abandoned',
+}
+
+export enum ServiceWarning {
+  ReverseSwapsDisabled = 'reverse.swaps.disabled',
+}
+
+export enum ServiceInfo {
+  PrepayMinerFee = 'prepay.minerfee',
 }
 
 export enum Network {
@@ -25,8 +78,20 @@ export enum Network {
   Regtest = 'regtest',
 }
 
-export enum ClientStatus {
-  Disconnected,
-  Connected,
-  OutOfSync,
+export enum SwapType {
+  Submarine = 'submarine',
+  ReverseSubmarine = 'reversesubmarine',
+}
+
+export enum BaseFeeType {
+  NormalClaim,
+
+  ReverseLockup,
+  ReverseClaim,
+}
+
+export enum CurrencyType {
+  BitcoinLike,
+  Ether,
+  ERC20
 }

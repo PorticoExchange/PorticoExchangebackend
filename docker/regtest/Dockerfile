@@ -1,26 +1,44 @@
-FROM alpine:3.9
+ARG UBUNTU_VERSION
+
+ARG BITCOIN_VERSION
+ARG LITECOIN_VERSION
+
+ARG LND_VERSION
+
+FROM boltz/bitcoin-core:${BITCOIN_VERSION} AS bitcoin-core
+FROM boltz/litecoin-core:${LITECOIN_VERSION} AS litecoin-core
+
+FROM boltz/lnd:${LND_VERSION} as lnd
+
+FROM ubuntu:${UBUNTU_VERSION}
 
 # Install dependencies
-RUN apk --no-cache add \
+RUN apt-get update && apt-get -y upgrade
+RUN apt-get -y install \
   jq \
-  boost \
-  libzmq \
-  libevent \
-  libressl \
-  boost-program_options
+  psmisc \
+  openssl \
+  libzmq3-dev \
+  libevent-dev \
+  libevent-dev \
+  libboost-chrono-dev \
+  libboost-system-dev \
+  libboost-thread-dev \
+  libboost-filesystem-dev \
+  libboost-program-options-dev
 
-# Copy Bitcoin and Litecoin Core executables
-COPY --from=boltz/bitcoin-core:latest /bin/bitcoind /bin/
-COPY --from=boltz/bitcoin-core:latest /bin/bitcoin-cli /bin/
+# Copy node executables
+COPY --from=bitcoin-core /bin/bitcoind /bin/
+COPY --from=bitcoin-core /bin/bitcoin-cli /bin/
 
-COPY --from=boltz/litecoin-core:latest /bin/litecoind /bin/
-COPY --from=boltz/litecoin-core:latest /bin/litecoin-cli /bin/
+COPY --from=litecoin-core /bin/litecoind /bin/
+COPY --from=litecoin-core /bin/litecoin-cli /bin/
 
 # Copy the LND executables
-COPY --from=boltz/lnd:latest /bin/lnd /bin/
-COPY --from=boltz/lnd:latest /bin/lncli /bin/
+COPY --from=lnd /bin/lnd /bin/
+COPY --from=lnd /bin/lncli /bin/
 
-# Copy configuration files for Bitcoin Core, Litecoin Core and the LNDs
+# Copy configuration files
 COPY regtest/data/core/config.conf /root/.bitcoin/bitcoin.conf
 COPY regtest/data/core/config.conf /root/.litecoin/litecoin.conf
 
@@ -44,31 +62,27 @@ COPY regtest/data/lnd/macaroons /root/.lnd-btc2/data/chain/bitcoin/regtest/
 COPY regtest/data/lnd/macaroons /root/.lnd-ltc/data/chain/litecoin/regtest/
 COPY regtest/data/lnd/macaroons /root/.lnd-ltc2/data/chain/litecoin/regtest/
 
-# Configure ZMQ for Bitcoin and Litecoin Core
-RUN echo "zmqpubrawtx=tcp://0.0.0.0:29000" >> /root/.bitcoin/bitcoin.conf
-RUN echo "zmqpubrawblock=tcp://0.0.0.0:29001" >> /root/.bitcoin/bitcoin.conf
-RUN echo "zmqpubhashblock=tcp://0.0.0.0:29002" >> /root/.bitcoin/bitcoin.conf
-
-RUN echo "zmqpubrawtx=tcp://0.0.0.0:30000" >> /root/.litecoin/litecoin.conf
-RUN echo "zmqpubrawblock=tcp://0.0.0.0:30001" >> /root/.litecoin/litecoin.conf
-RUN echo "zmqpubhashblock=tcp://0.0.0.0:30002" >> /root/.litecoin/litecoin.conf
-
 # Copy start scripts
 COPY regtest/scripts /bin/
 
-# Run the setup script
-RUN "setup.sh"
+# Configure the daemons
+RUN bash configure.sh
 
-# Expose RPC ports of Bitcoin and Litecoin Core
+# Run the setup script
+RUN bash setup.sh
+
+# Expose RPC ports of the nodes
 EXPOSE 18443 19443
 
-# Expose ZMQ ports of Bitcoin and Litecoin Core
-EXPOSE 29000 29001 30000 30001
+# Expose ZMQ ports of the nodes
+EXPOSE 29000 29001 29002 30000 30001 30002
+
+EXPOSE 9735
 
 # Expose gRPC ports of the LNDs
-EXPOSE 10009 10010 11009 11009
+EXPOSE 10009 10011 11009 11010
 
 # Expose REST API ports of the LNDs
 EXPOSE 8080 8081
 
-ENTRYPOINT ["entrypoint.sh"] 
+ENTRYPOINT ["entrypoint.sh"]

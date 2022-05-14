@@ -4,8 +4,8 @@ import { ClientStatus } from './consts/Enums';
 class BaseClient extends EventEmitter {
   protected status = ClientStatus.Disconnected;
 
-  protected readonly RECONNECT_INTERVAL = 1000;
-  protected reconnectionTimer?: NodeJS.Timer;
+  protected readonly RECONNECT_INTERVAL = 5000;
+  protected reconnectionTimer?: any;
 
   constructor() {
     super();
@@ -27,7 +27,7 @@ class BaseClient extends EventEmitter {
     this.status = status;
   }
 
-  protected clearReconnectTimer = () => {
+  protected clearReconnectTimer = (): void => {
     if (this.reconnectionTimer) {
       clearInterval(this.reconnectionTimer);
       this.reconnectionTimer = undefined;

@@ -1,23 +1,116 @@
 import fs from 'fs';
 import path from 'path';
-import toml from 'toml';
+import toml from '@iarna/toml';
 import { Arguments } from 'yargs';
 import Errors from './consts/Errors';
-import { GrpcConfig } from './grpc/GrpcServer';
-import { ChainConfig } from './chain/ChainClient';
+import { Network } from './consts/Enums';
+import { PairConfig } from './consts/Types';
 import { LndConfig } from './lightning/LndClient';
-import { Chain, Symbol, Network } from './consts/Enums';
 import { deepMerge, resolveHome, getServiceDataDir } from './Utils';
 
-type ServiceOptions = {
-  configpath?: string;
+type ChainConfig = {
+  host: string;
+  port: number;
+
+  // Cookie file authentication is preferred if both, cookie and user/password, are configured
+  cookie?: string;
+
+  user?: string;
+  password?: string;
+
+  zmqpubrawtx?: string;
+  zmqpubrawblock?: string;
+  zmqpubhashblock?: string;
+
+  // API endpoint of a MempoolSpace instance running on the chain of the configured client
+  mempoolSpace?: string;
 };
 
 type CurrencyConfig = {
-  symbol: Symbol,
+  symbol: string,
   network: Network;
-  chain: ChainConfig & ServiceOptions;
-  lnd?: LndConfig & ServiceOptions;
+
+  chain: ChainConfig;
+  lnd?: LndConfig;
+
+  // Expiry of the invoices of this this currency in seconds
+  invoiceExpiry?: number;
+
+  maxSwapAmount: number;
+  minSwapAmount: number;
+
+  minWalletBalance: number;
+  maxWalletBalance?: number;
+
+  minLocalBalance: number;
+  minRemoteBalance: number;
+
+  maxZeroConfAmount: number;
+};
+
+type TokenConfig = {
+  symbol: string;
+
+  // Must not be set for Ether
+  decimals?: number;
+  contractAddress?: string;
+
+  maxSwapAmount: number;
+  minSwapAmount: number;
+
+  minWalletBalance: number;
+  maxWalletBalance?: number;
+};
+
+type EthProviderServiceConfig = {
+  network: string;
+  apiKey: string;
+};
+
+type EthereumConfig = {
+  providerEndpoint: string;
+
+  infura: EthProviderServiceConfig;
+  alchemy: EthProviderServiceConfig;
+
+  etherSwapAddress: string;
+  erc20SwapAddress: string;
+
+  tokens: TokenConfig[];
+};
+
+type ApiConfig = {
+  host: string;
+  port: number;
+};
+
+type GrpcConfig = {
+  host: string,
+  port: number,
+};
+
+type RatesConfig = {
+  interval: number;
+};
+
+type BackupConfig = {
+  email: string;
+  privatekeypath: string;
+
+  bucketname: string;
+
+  // The interval has to be a cron schedule expression
+  interval: string;
+};
+
+type NotificationConfig = {
+  token: string;
+  channel: string;
+
+  prefix: string;
+  interval: number;
+
+  otpsecretpath: string;
 };
 
 type ConfigType = {
@@ -30,15 +123,38 @@ type ConfigType = {
 
   loglevel: string;
 
+  retryInterval: number;
+
+  prepayminerfee: boolean;
+  swapwitnessaddress: boolean;
+
+  api: ApiConfig;
   grpc: GrpcConfig;
-  lndpath: string;
+  rates: RatesConfig;
+  backup: BackupConfig;
+  notification: NotificationConfig;
+
+  pairs: PairConfig[];
   currencies: CurrencyConfig[];
+
+  ethereum: EthereumConfig;
 };
 
 class Config {
-  private config: ConfigType;
+  // Default paths
+  public static defaultDataDir = getServiceDataDir('boltz');
 
-  private dataDir: string;
+  public static defaultConfigPath = 'boltz.conf';
+  public static defaultMnemonicPath = 'seed.dat';
+  public static defaultLogPath = 'boltz.log';
+  public static defaultDbPath = 'boltz.db';
+
+  public static defaultPrivatekeyPath = 'backupPrivatekey.pem';
+
+  public static defaultOtpSecretPath = 'otpSecret.dat';
+
+  private readonly config: ConfigType;
+  private readonly dataDir = Config.defaultDataDir;
 
   /**
    * The constructor sets the default values
@@ -46,7 +162,14 @@ class Config {
   constructor() {
     this.dataDir = getServiceDataDir('boltz');
 
-    const { configpath, mnemonicpath, dbpath, logpath } = this.getDataDirPaths(this.dataDir);
+    const {
+      dbpath,
+      backup,
+      logpath,
+      configpath,
+      mnemonicpath,
+      notification,
+    } = this.getDataDirPaths(this.dataDir);
 
     this.config = {
       configpath,
@@ -57,49 +180,139 @@ class Config {
       datadir: this.dataDir,
       loglevel: this.getDefaultLogLevel(),
 
+      retryInterval: 15,
+
+      prepayminerfee: false,
+      swapwitnessaddress: false,
+
+      api: {
+        host: '127.0.0.1',
+        port: 9001,
+      },
+
       grpc: {
         host: '127.0.0.1',
         port: 9000,
-        certpath: path.join(this.dataDir, 'tls.cert'),
-        keypath: path.join(this.dataDir, 'tls.key'),
       },
 
-      lndpath: getServiceDataDir('lnd'),
+      rates: {
+        interval: 1,
+      },
+
+      backup: {
+        email: '',
+        privatekeypath: backup.privatekeypath,
+
+        bucketname: '',
+
+        interval: '0 0 * * *',
+      },
+
+      notification: {
+        token: '',
+        channel: '',
+
+        prefix: '',
+        interval: 1,
+
+        otpsecretpath: notification.otpsecretpath,
+      },
+
+      pairs: [
+        {
+          base: 'LTC',
+          quote: 'BTC',
+          fee: 5,
+        },
+        {
+          base: 'BTC',
+          quote: 'BTC',
+          fee: 1,
+          rate: 1,
+        },
+        {
+          base: 'LTC',
+          quote: 'LTC',
+          fee: 1,
+          rate: 1,
+        },
+      ],
 
       currencies: [
         {
-          symbol: Symbol.BTC,
+          symbol: 'BTC',
           network: Network.Testnet,
+
+          maxSwapAmount: 100000,
+          minSwapAmount: 1000,
+
+          minWalletBalance: 1000000,
+
+          minLocalBalance: 500000,
+          minRemoteBalance: 500000,
+
+          maxZeroConfAmount: 200000,
+
           chain: {
             host: '127.0.0.1',
             port: 18334,
-            rpcuser: 'user',
-            rpcpass: 'user',
+            cookie: 'docker/regtest/data/core/cookies/.bitcoin-cookie',
           },
+
           lnd: {
             host: '127.0.0.1',
             port: 10009,
             certpath: path.join(getServiceDataDir('lnd'), 'tls.cert'),
-            macaroonpath: path.join(getServiceDataDir('lnd'), 'data', 'chain', Chain.BTC, Network.Testnet, 'admin.macaroon'),
+            macaroonpath: path.join(getServiceDataDir('lnd'), 'data', 'chain', 'bitcoin', Network.Testnet, 'admin.macaroon'),
           },
         },
         {
-          symbol: Symbol.LTC,
+          symbol: 'LTC',
           network: Network.Testnet,
+
+          maxSwapAmount: 10000000,
+          minSwapAmount: 10000,
+
+          minWalletBalance: 100000000,
+
+          minLocalBalance: 50000000,
+          minRemoteBalance: 50000000,
+
+          maxZeroConfAmount: 20000000,
+
           chain: {
             host: '127.0.0.1',
             port: 19334,
-            rpcuser: 'user',
-            rpcpass: 'user',
+            cookie: 'docker/regtest/data/core/cookies/.litecoin-cookie',
           },
+
           lnd: {
             host: '127.0.0.1',
             port: 11009,
             certpath: path.join(getServiceDataDir('lnd'), 'tls.cert'),
-            macaroonpath: path.join(getServiceDataDir('lnd'), 'data', 'chain', Chain.LTC, Network.Testnet, 'admin.macaroon'),
+            macaroonpath: path.join(getServiceDataDir('lnd'), 'data', 'chain', 'litecoin', Network.Testnet, 'admin.macaroon'),
           },
         },
       ],
+
+      ethereum: {
+        providerEndpoint: '',
+
+        infura: {
+          apiKey: '',
+          network: 'rinkeby',
+        },
+
+        alchemy: {
+          apiKey: '',
+          network: 'rinkeby',
+        },
+
+        etherSwapAddress: '',
+        erc20SwapAddress: '',
+
+        tokens: [],
+      },
     };
   }
 
@@ -163,7 +376,11 @@ class Config {
     if (fs.existsSync(filename)) {
       try {
         const tomlFile = fs.readFileSync(filename, 'utf-8');
-        return toml.parse(tomlFile);
+        const parsedToml = toml.parse(tomlFile) as ConfigType;
+
+        parsedToml.configpath = filename;
+
+        return parsedToml;
       } catch (error) {
         throw Errors.COULD_NOT_PARSE_CONFIG(filename, JSON.stringify(error));
       }
@@ -172,14 +389,17 @@ class Config {
 
   private getDataDirPaths = (dataDir: string) => {
     return {
-      configpath: path.join(dataDir, 'boltz.conf'),
-      mnemonicpath: path.join(dataDir, 'seed.dat'),
-      dbpath: path.join(dataDir, 'boltz.db'),
-      logpath: path.join(dataDir, 'boltz.log'),
+      configpath: path.join(dataDir, Config.defaultConfigPath),
+      mnemonicpath: path.join(dataDir, Config.defaultMnemonicPath),
+      dbpath: path.join(dataDir, Config.defaultDbPath),
+      logpath: path.join(dataDir, Config.defaultLogPath),
 
-      grpc: {
-        certpath: path.join(dataDir, 'tls.cert'),
-        keypath: path.join(dataDir, 'tls.key'),
+      backup: {
+        privatekeypath: path.join(dataDir, Config.defaultPrivatekeyPath),
+      },
+
+      notification: {
+        otpsecretpath: path.join(dataDir, Config.defaultOtpSecretPath),
       },
     };
   }
@@ -194,4 +414,15 @@ class Config {
 }
 
 export default Config;
-export { ConfigType };
+export {
+  ApiConfig,
+  ConfigType,
+  GrpcConfig,
+  ChainConfig,
+  TokenConfig,
+  BackupConfig,
+  EthereumConfig,
+  CurrencyConfig,
+  NotificationConfig,
+  EthProviderServiceConfig,
+};

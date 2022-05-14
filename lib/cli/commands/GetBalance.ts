@@ -1,20 +1,16 @@
 import { Arguments } from 'yargs';
+import BuilderComponents from '../BuilderComponents';
 import { callback, loadBoltzClient } from '../Command';
 import { GetBalanceRequest } from '../../proto/boltzrpc_pb';
-import BuilderComponents from '../BuilderComponents';
 
-export const command = 'getbalance [currency]';
+export const command = 'getbalance';
 
-export const describe = 'gets the balance for either all wallets or just a single one if specified';
+export const describe = 'gets the balance of all wallets';
 
 export const builder = {
-  currency: BuilderComponents.currency,
+  symbol: BuilderComponents.symbol,
 };
 
-export const handler = (argv: Arguments<any>) => {
-  const request = new GetBalanceRequest();
-
-  request.setCurrency(argv.currency);
-
-  loadBoltzClient(argv).getBalance(request, callback);
+export const handler = (argv: Arguments<any>): void => {
+  loadBoltzClient(argv).getBalance(new GetBalanceRequest(), callback);
 };

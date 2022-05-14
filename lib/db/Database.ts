@@ -1,34 +1,39 @@
-import fs from 'fs';
-import path from 'path';
 import Sequelize from 'sequelize';
-import * as db from '../consts/Database';
 import Logger from '../Logger';
-
-type Models = {
-  Wallet: Sequelize.Model<db.WalletInstance, db.WalletAttributes>;
-  Output: Sequelize.Model<db.OutputInstance, db.OutputAttributes>;
-  Utxo: Sequelize.Model<db.UtxoInstance, db.UtxoAttributes>;
-};
+import Pair from './models/Pair';
+import Swap from './models/Swap';
+import Migration from './Migration';
+import ChainTip from './models/ChainTip';
+import Referral from './models/Referral';
+import ReverseSwap from './models/ReverseSwap';
+import KeyProvider from './models/KeyProvider';
+import { Currency } from '../wallet/WalletManager';
+import DatabaseVersion from './models/DatabaseVersion';
+import ChannelCreation from './models/ChannelCreation';
+import PendingEthereumTransaction from './models/PendingEthereumTransaction';
 
 class Db {
   public sequelize: Sequelize.Sequelize;
-  public models: Models;
+
+  private migration: Migration;
 
   /**
-   * @param storage the file path to the SQLite databse; if ':memory:' the databse will be stored in the memory
+   * @param logger logger that should be used
+   * @param storage the file path to the SQLite database; if ':memory:' the database will be stored in the memory
    */
   constructor(private logger: Logger, private storage: string) {
-    this.sequelize = new Sequelize({
+    this.sequelize = new Sequelize.Sequelize({
       storage,
-      logging: this.logger.silly,
       dialect: 'sqlite',
-      operatorsAliases: false,
+      logging: this.logger.silly,
     });
 
-    this.models = this.loadModels();
+    this.loadModels();
+
+    this.migration = new Migration(this.logger, this.sequelize);
   }
 
-  public init = async () => {
+  public init = async (): Promise<void> => {
     try {
       await this.sequelize.authenticate();
       this.logger.info(`Connected to database: ${this.storage === ':memory:' ? 'in memory' : this.storage}`);
@@ -37,40 +42,42 @@ class Db {
       throw error;
     }
 
-    await this.models.Wallet.sync();
+    await Promise.all([
+      Pair.sync(),
+      ChainTip.sync(),
+      Referral.sync(),
+      KeyProvider.sync(),
+      DatabaseVersion.sync(),
+      PendingEthereumTransaction.sync(),
+    ]);
 
     await Promise.all([
-      this.models.Output.sync(),
-      this.models.Utxo.sync(),
+      Swap.sync(),
+      ReverseSwap.sync(),
     ]);
+
+    await ChannelCreation.sync();
   }
 
-  public close = async () => {
-    await this.sequelize.close();
+  public migrate = async (currencies: Map<string, Currency>): Promise<void> => {
+    await this.migration.migrate(currencies);
   }
 
-  private loadModels = (): Models => {
-    const models: { [index: string]: Sequelize.Model<any, any> } = {};
-    const modelsFolder = path.join(__dirname, 'models');
+  public close = (): Promise<void> => {
+    return this.sequelize.close();
+  }
 
-    fs.readdirSync(modelsFolder)
-      .filter(file => (file.indexOf('.') !== 0) && (file !== path.basename(__filename)) &&
-       (file.endsWith('.js') || file.endsWith('.ts')) && !file.endsWith('.d.ts'))
-      .forEach((file) => {
-        const model = this.sequelize.import(path.join(modelsFolder, file));
-        models[model.name] = model;
-      });
-
-    Object.keys(models).forEach((key) => {
-      const model = models[key];
-      if (model.associate) {
-        model.associate(models);
-      }
-    });
-
-    return <Models>models;
+  private loadModels = () => {
+    Pair.load(this.sequelize);
+    Referral.load(this.sequelize);
+    Swap.load(this.sequelize);
+    ChainTip.load(this.sequelize);
+    ReverseSwap.load(this.sequelize);
+    KeyProvider.load(this.sequelize);
+    ChannelCreation.load(this.sequelize);
+    DatabaseVersion.load(this.sequelize);
+    PendingEthereumTransaction.load(this.sequelize);
   }
 }
 
 export default Db;
-export { Models };

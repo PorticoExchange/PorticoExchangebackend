@@ -1,55 +1,30 @@
 export default {
-  currency: {
-    describe: 'ticker symbol of the currency',
-    type: 'string',
-  },
-  base_currency: {
-    describe: 'base currency of the order',
-    type: 'string',
-  },
-  quote_currency: {
-    describe: 'quote currency of the order',
-    type: 'string',
-  },
-  orderSide: {
-    describe: 'whether the order is a buy or sell one',
-    type: 'string',
-    choices: ['buy', 'sell'],
-  },
-  rate: {
-    describe: 'conversion rate of base and quote currency',
-    type: 'number',
-  },
-  outputType: {
-    describe: 'type of the output',
-    type: 'string',
-    choices: ['bech32', 'compatibility', 'legacy'],
-    default: 'compatibility',
-  },
   network: {
-    describe: 'network on which the transaction will be used',
+    describe: 'network on which the should be broadcast',
     type: 'string',
   },
-  lockupTransaction: {
-    describe: 'hex encoded lockup transaction',
+  privateKey: {
+    describe: 'private key of the key pair',
     type: 'string',
   },
   redeemScript: {
-    describe: 'hex encoded redeem script of the swap output',
+    describe: 'redeem script of the swap',
+    type: 'string',
+  },
+  rawTransaction: {
+    describe: 'raw lockup transaction',
     type: 'string',
   },
   destinationAddress: {
-    describe: 'address to which the claimed funds should be sent',
+    describe: 'address to which the coins should be claimed',
     type: 'string',
   },
-  feePerByte: {
-    describe: 'amount of satoshis per vbyte that should be paid as fee',
-    type: 'number',
-    default: 2,
+  symbol: {
+    describe: 'ticker symbol of the currency',
+    type: 'string',
   },
-  timeoutBlockNumber: {
-    describe: 'after how my blocks the onchain script of the swap should time out',
-    default: '10',
-    type: 'number',
+  token: {
+    describe: 'whether a token should be claimed',
+    type: 'boolean',
   },
 };

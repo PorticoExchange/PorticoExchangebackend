@@ -1,6 +1,11 @@
 {
   "include": [
-    "lib",
+    "lib"
+  ],
+  "files": [
+    "./node_modules/@nomiclabs/hardhat-ethers/src/types/index.ts",
+    "./node_modules/@nomiclabs/hardhat-waffle/src/type-extensions.ts",
+    "./node_modules/@nomiclabs/hardhat-etherscan/src/type-extensions.ts"
   ],
   "compilerOptions": {
     "target": "ES2016", /* Specify ECMAScript target version: 'ES3' (default), 'ES5', 'ES2015', 'ES2016', 'ES2017','ES2018' or 'ESNEXT'. */
@@ -10,6 +15,7 @@
     "strict": true, /* Enable all strict type-checking options. */
     "noEmitOnError": false,
     "noImplicitAny": false, /* Raise error on expressions and declarations with an implied 'any' type. */
+    "incremental": true,
     "declaration": true,
     "lib": [
       "dom",
@@ -36,7 +42,7 @@
     "esModuleInterop": true, /* Enables emit interoperability between CommonJS and ES Modules via creation of namespace objects for all imports. Implies 'allowSyntheticDefaultImports'. */
     // "preserveSymlinks": true,              /* Do not resolve the real path of symlinks. */
     /* Source Map Options */
-    "sourceMap": true
+    "sourceMap": true,
     // "sourceRoot": "./",                    /* Specify the location where debugger should locate TypeScript files instead of source locations. */
     // "mapRoot": "./",                       /* Specify the location where debugger should locate map files instead of generated locations. */
     // "inlineSourceMap": true,               /* Emit a single file with source maps instead of having a separate file. */
@@ -44,5 +50,7 @@
     /* Experimental Options */
     // "experimentalDecorators": true,        /* Enables experimental support for ES7 decorators. */
     // "emitDecoratorMetadata": true,         /* Enables experimental support for emitting type metadata for decorators. */
+    "skipLibCheck": true,
+    "resolveJsonModule": true
   }
 }

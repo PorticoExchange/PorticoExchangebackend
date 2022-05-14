@@ -1,26 +1,31 @@
 import winston from 'winston';
-import colors from 'colors/safe';
+import { red, yellow, green, cyan, blue, magenta } from 'colors/safe';
 import { getTsString } from './Utils';
 
 class Logger {
-  public static readonly disabledLogger = new Logger('', '', true);
+  public static readonly disabledLogger = new Logger('', undefined, true);
 
-  constructor(filename: string, level: string, private disabled = false) {
+  constructor(level: string, filename?: string, private disabled = false) {
     if (disabled) {
       return;
     }
 
+    const transports: winston.transport[] = [
+      new winston.transports.Console({
+        format: this.getLogFormat(true),
+      }),
+    ];
+
+    if (filename) {
+      transports.push(new winston.transports.File({
+        filename,
+        format: this.getLogFormat(false),
+      }));
+    }
+
     winston.configure({
       level,
-      transports: [
-        new winston.transports.Console({
-          format: this.getLogFormat(true),
-        }),
-        new winston.transports.File({
-          filename,
-          format: this.getLogFormat(false),
-        }),
-      ],
+      transports,
     });
   }
 
@@ -31,38 +36,38 @@ class Logger {
   private getLevel = (level: string, colorize: boolean) => {
     if (colorize) {
       switch (level) {
-        case 'error': return colors.red(level);
-        case 'warn': return colors.yellow(level);
-        case 'info': return colors.green(level);
-        case 'verbose': return colors.cyan(level);
-        case 'debug': return colors.blue(level);
-        case 'silly': return colors.magenta(level);
+        case 'error': return red(level);
+        case 'warn': return yellow(level);
+        case 'info': return green(level);
+        case 'verbose': return cyan(level);
+        case 'debug': return blue(level);
+        case 'silly': return magenta(level);
       }
     }
     return level;
   }
 
-  public error = (message: string) => {
+  public error = (message: string): void => {
     this.log('error', message);
   }
 
-  public warn = (message: string) => {
+  public warn = (message: string): void => {
     this.log('warn', message);
   }
 
-  public info = (message: string) => {
+  public info = (message: string): void => {
     this.log('info', message);
   }
 
-  public verbose = (message: string) => {
+  public verbose = (message: string): void => {
     this.log('verbose', message);
   }
 
-  public debug = (message: string) => {
+  public debug = (message: string): void => {
     this.log('debug', message);
   }
 
-  public silly = (message: string) => {
+  public silly = (message: string): void => {
     this.log('silly', message);
   }
 

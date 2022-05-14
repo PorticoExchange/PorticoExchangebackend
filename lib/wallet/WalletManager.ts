@@ -1,127 +1,185 @@
 import fs from 'fs';
-import bip39 from 'bip39';
-import bip32, { BIP32 } from 'bip32';
+import { providers } from 'ethers';
 import { Network } from 'bitcoinjs-lib';
+import { BIP32Interface, fromSeed } from 'bip32';
+import { mnemonicToSeedSync, validateMnemonic } from 'bip39';
 import Errors from './Errors';
 import Wallet from './Wallet';
 import Logger from '../Logger';
-import Database from '../db/Database';
-import { WalletInfo } from '../consts/Types';
-import UtxoRepository from './UtxoRepository';
 import { splitDerivationPath } from '../Utils';
 import ChainClient from '../chain/ChainClient';
 import LndClient from '../lightning/LndClient';
-import WalletRepository from './WalletRepository';
-import OutputRepository from './OutputRepository';
+import { CurrencyType } from '../consts/Enums';
+import KeyRepository from '../db/repositories/KeyRepository';
+import EthereumManager from './ethereum/EthereumManager';
+import ChainTipRepository from '../db/repositories/ChainTipRepository';
+import { KeyProviderType } from '../db/models/KeyProvider';
+import LndWalletProvider from './providers/LndWalletProvider';
+import CoreWalletProvider from './providers/CoreWalletProvider';
+import WalletProviderInterface from './providers/WalletProviderInterface';
+
+type CurrencyLimits = {
+  maxSwapAmount: number;
+  minSwapAmount: number;
+
+  minWalletBalance: number;
+
+  minLocalBalance?: number;
+  minRemoteBalance?: number;
+
+  maxZeroConfAmount?: number;
+};
 
 type Currency = {
   symbol: string;
-  network: Network;
-  chainClient: ChainClient;
-  lndClient: LndClient;
+  type: CurrencyType,
+  limits: CurrencyLimits;
+
+  // Needed for UTXO based coins
+  network?: Network;
+  lndClient?: LndClient;
+  chainClient?: ChainClient;
+
+  // Needed for Ether and tokens on Ethereum
+  provider?: providers.Provider;
 };
 
+/**
+ * WalletManager creates wallets instances that generate keys derived from the seed and
+ * interact with the wallet of LND to send and receive onchain coins
+ */
 class WalletManager {
   public wallets = new Map<string, Wallet>();
 
-  private masterNode: BIP32;
-  private repository: WalletRepository;
+  public ethereumManager?: EthereumManager;
 
-  private utxoRepository: UtxoRepository;
-  private outputResository: OutputRepository;
+  private readonly mnemonic: string;
+  private readonly masterNode: BIP32Interface;
+  private readonly keyRepository: KeyRepository;
 
   private readonly derivationPath = 'm/0';
 
-  /**
-   * WalletManager initiates multiple HD wallets
-   */
-  constructor(private logger: Logger, private currencies: Currency[], db: Database, mnemonicPath: string) {
-    this.masterNode = bip32.fromBase58(this.loadMnemonic(mnemonicPath));
+  constructor(private logger: Logger, mnemonicPath: string, private currencies: Currency[], ethereumManager?: EthereumManager) {
+    this.mnemonic = this.loadMnemonic(mnemonicPath);
+    this.masterNode = fromSeed(mnemonicToSeedSync(this.mnemonic));
 
-    this.repository = new WalletRepository(db.models);
-    this.utxoRepository = new UtxoRepository(db.models);
-    this.outputResository = new OutputRepository(db.models);
+    this.keyRepository = new KeyRepository();
+
+    this.ethereumManager = ethereumManager;
   }
 
   /**
-   * Initiates a new WalletManager with a mnemonic
+   * Initializes a new WalletManager with a mnemonic
    */
-  public static fromMnemonic = (logger: Logger, mnemonic: string, mnemonicPath: string, currencies: Currency[], db: Database) => {
-    if (!bip39.validateMnemonic(mnemonic)) {
+  public static fromMnemonic = (logger: Logger, mnemonic: string, mnemonicPath: string, currencies: Currency[], ethereumManager?: EthereumManager): WalletManager => {
+    if (!validateMnemonic(mnemonic)) {
       throw(Errors.INVALID_MNEMONIC(mnemonic));
     }
 
-    fs.writeFileSync(mnemonicPath, bip32.fromSeed(bip39.mnemonicToSeed(mnemonic)).toBase58());
+    fs.writeFileSync(mnemonicPath, mnemonic);
 
-    return new WalletManager(logger, currencies, db, mnemonicPath);
+    return new WalletManager(logger, mnemonicPath, currencies, ethereumManager);
   }
 
-  public init = async () => {
-    const walletsMap = await this.getWalletsMap();
+  public init = async (chainTipRepository: ChainTipRepository): Promise<void> => {
+    const keyProviderMap = await this.getKeyProviderMap();
 
     for (const currency of this.currencies) {
-      let walletInfo = walletsMap.get(currency.symbol);
+      if (currency.type !== CurrencyType.BitcoinLike) {
+        continue;
+      }
 
-      const { blocks } = await currency.chainClient.getBlockchainInfo();
+      let walletProvider: WalletProviderInterface | undefined = undefined;
 
-      // Generate a new sub-wallet if that currency doesn't have one yet
-      if (!walletInfo) {
-        walletInfo = {
-          derivationPath: `${this.derivationPath}/${this.getHighestDepthIndex(2, walletsMap) + 1}`,
+      // The LND client is also used as onchain wallet for UTXO based chains if available
+      if (currency.lndClient !== undefined) {
+        walletProvider = new LndWalletProvider(this.logger, currency.lndClient, currency.chainClient!);
+
+      // Else the Bitcoin Core wallet is used
+      } else {
+        walletProvider = new CoreWalletProvider(this.logger, currency.chainClient!);
+
+        // Sanity check that wallet support is compiled in
+        try {
+          await walletProvider.getBalance();
+        } catch (error) {
+          // No wallet support is compiled in
+          if ((error as any).message === 'Method not found') {
+            throw Errors.NO_WALLET_SUPPORT(currency.symbol);
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      let keyProviderInfo = keyProviderMap.get(currency.symbol);
+
+      // Generate a new KeyProvider if that currency does not have one yet
+      if (!keyProviderInfo) {
+        keyProviderInfo = {
           highestUsedIndex: 0,
-          blockheight: blocks,
+          symbol: currency.symbol,
+          derivationPath: `${this.derivationPath}/${this.getHighestDepthIndex(keyProviderMap, 2) + 1}`,
         };
 
-        walletsMap.set(currency.symbol, walletInfo);
+        keyProviderMap.set(currency.symbol, keyProviderInfo);
 
-        await this.repository.addWallet({
-          ...walletInfo,
+        await this.keyRepository.addKeyProvider({
+          ...keyProviderInfo,
           symbol: currency.symbol,
         });
       }
 
       const wallet = new Wallet(
         this.logger,
-        this.repository,
-        this.outputResository,
-        this.utxoRepository,
-        this.masterNode,
-        currency.network,
-        currency.chainClient,
-        walletInfo.derivationPath,
-        walletInfo.highestUsedIndex,
+        CurrencyType.BitcoinLike,
+        walletProvider,
       );
 
-      await wallet.init(walletInfo.blockheight);
+      wallet.initKeyProvider(
+        currency.network!,
+        keyProviderInfo.derivationPath,
+        keyProviderInfo.highestUsedIndex,
+        this.masterNode,
+        this.keyRepository,
+      );
 
       this.wallets.set(currency.symbol, wallet);
     }
+
+    if (this.ethereumManager) {
+      const ethereumWallets = await this.ethereumManager.init(this.mnemonic, chainTipRepository);
+
+      for (const [symbol, ethereumWallet] of ethereumWallets) {
+        this.wallets.set(symbol, ethereumWallet);
+      }
+    }
   }
 
-  private loadMnemonic = (filename: string): string => {
+  private loadMnemonic = (filename: string) => {
     if (fs.existsSync(filename)) {
-      return fs.readFileSync(filename, 'utf-8');
+      return fs.readFileSync(filename, 'utf-8').trim();
     }
 
     throw(Errors.NOT_INITIALIZED());
   }
 
-  private getWalletsMap = async() => {
-    const map = new Map<string, WalletInfo>();
-    const wallets = await this.repository.getWallets();
+  private getKeyProviderMap = async () => {
+    const map = new Map<string, KeyProviderType>();
+    const keyProviders = await this.keyRepository.getKeyProviders();
 
-    wallets.forEach((wallet) => {
-      map.set(wallet.symbol, {
-        derivationPath: wallet.derivationPath,
-        highestUsedIndex: wallet.highestUsedIndex,
-        blockheight: wallet.blockheight,
+    keyProviders.forEach((keyProvider) => {
+      map.set(keyProvider.symbol, {
+        symbol: keyProvider.symbol,
+        derivationPath: keyProvider.derivationPath,
+        highestUsedIndex: keyProvider.highestUsedIndex,
       });
     });
 
     return map;
   }
 
-  private getHighestDepthIndex = (depth: number, map: Map<string, WalletInfo>): number => {
+  private getHighestDepthIndex = (map: Map<string, KeyProviderType>, depth: number): number => {
     if (depth === 0) {
       throw(Errors.INVALID_DEPTH_INDEX(depth));
     }

@@ -1,42 +1,41 @@
+ARG UBUNTU_VERSION
+ARG BERKELEY_VERSION
+
+FROM boltz/berkeley-db:${BERKELEY_VERSION} AS berkeley-db
+
 # Build Litecoin Core
-FROM alpine:3.9 as litecoin-core
+FROM ubuntu:${UBUNTU_VERSION} as litecoin-core
 
-COPY --from=boltz/berkeley-db /opt /opt
+ARG VERSION
 
-RUN apk update
-RUN apk upgrade
-RUN apk --no-cache add \
-  file \
-  gnupg \
+COPY --from=berkeley-db /opt /opt
+
+RUN apt-get update && apt-get -y upgrade
+RUN DEBIAN_FRONTEND=noninteractive apt-get -y install \
+  wget \
   libtool \
-  chrpath \
+  python3 \
   automake \
-  libressl \
-  autoconf \
-  boost-dev \
-  build-base \
-  zeromq-dev \
+  pkg-config \
+  libssl-dev \
+  libzmq3-dev \
+  bsdmainutils \
   libevent-dev \
-  libressl-dev \
-  protobuf-dev \
-  linux-headers
+  autotools-dev \
+  build-essential \ 
+  libboost-test-dev \
+  libboost-chrono-dev \
+  libboost-system-dev \
+  libboost-thread-dev \
+  libboost-filesystem-dev
 
-RUN gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "0xFE3348877809386C"
+ENV LITECOIN_PREFIX=/opt/litecoin-${VERSION}
 
-ENV LITECOIN_VERSION=0.17.1rc1
-ENV LITECOIN_PREFIX=/opt/litecoin-${LITECOIN_VERSION}
-
-RUN wget https://github.com/litecoin-project/litecoin/archive/v${LITECOIN_VERSION}.tar.gz
+RUN wget https://github.com/litecoin-project/litecoin/archive/v${VERSION}.tar.gz
 
 RUN tar -xzf *.tar.gz
 
-WORKDIR /litecoin-${LITECOIN_VERSION}
-
-RUN sed -i '/AC_PREREQ/a\AR_FLAGS=cr' src/univalue/configure.ac
-RUN sed -i '/AX_PROG_CC_FOR_BUILD/a\AR_FLAGS=cr' src/secp256k1/configure.ac
-RUN sed -i '/char\ scratchpad\[SCRYPT_SCRATCHPAD_SIZE\];/a\memset(scratchpad, 0, sizeof(scratchpad));' src/crypto/scrypt.cpp
-RUN sed -i 's/char\ scratchpad\[SCRYPT_SCRATCHPAD_SIZE\];/static &/g' src/crypto/scrypt.cpp
-RUN sed -i s:sys/fcntl.h:fcntl.h: src/compat.h
+WORKDIR /litecoin-${VERSION}
 
 RUN ./autogen.sh
 RUN ./configure LDFLAGS=-L`ls -d /opt/db*`/lib/ CPPFLAGS=-I`ls -d /opt/db*`/include/ \
@@ -50,30 +49,31 @@ RUN ./configure LDFLAGS=-L`ls -d /opt/db*`/lib/ CPPFLAGS=-I`ls -d /opt/db*`/incl
     --with-utils \
     --with-libs
 
-RUN make -j4
+RUN make -j$(nproc)
 RUN make install
-RUN strip ${LITECOIN_PREFIX}/bin/litecoin-cli
-RUN strip ${LITECOIN_PREFIX}/bin/litecoin-tx
-RUN strip ${LITECOIN_PREFIX}/bin/litecoind
-RUN strip ${LITECOIN_PREFIX}/lib/libbitcoinconsensus.a
-RUN strip ${LITECOIN_PREFIX}/lib/libbitcoinconsensus.so.0.0.0
+
+RUN strip --strip-all ${LITECOIN_PREFIX}/bin/litecoind
+RUN strip --strip-all ${LITECOIN_PREFIX}/bin/litecoin-tx
+RUN strip --strip-all ${LITECOIN_PREFIX}/bin/litecoin-cli
+RUN strip --strip-all ${LITECOIN_PREFIX}/bin/litecoin-wallet
 
 # Assemble the final image
-FROM alpine:3.9
+FROM ubuntu:${UBUNTU_VERSION}
 
-RUN apk update
-RUN apk upgrade
-RUN apk --no-cache add \
-  boost \
-  libzmq \
-  libevent \
-  libressl \
-  boost-program_options
+ARG VERSION
 
-ENV LITECOIN_VERSION=0.17.1rc1
+RUN apt-get update && apt-get -y upgrade
+RUN apt-get -y install \
+  openssl \
+  libzmq3-dev \
+  libevent-dev \
+  libboost-chrono-dev \
+  libboost-system-dev \
+  libboost-thread-dev \
+  libboost-filesystem-dev
 
-COPY --from=litecoin-core /opt/litecoin-${LITECOIN_VERSION}/bin /bin
+COPY --from=litecoin-core /opt/litecoin-${VERSION}/bin /bin
 
 EXPOSE 19332 19333 19444 19443
 
-ENTRYPOINT ["litecoind", "--help"]
+ENTRYPOINT ["litecoind"]

@@ -1,30 +1,37 @@
-# Build BerkeleyDB
-FROM alpine:3.9 as berkeley-db
+ARG UBUNTU_VERSION
 
-RUN apk update
-RUN apk upgrade
-RUN apk --no-cache add \
+# Build BerkeleyDB
+FROM ubuntu:${UBUNTU_VERSION} as berkeley-db
+
+ARG VERSION
+
+RUN apt-get update && apt-get -y upgrade
+RUN apt-get -y install \
+  wget \
+  openssl \
   autoconf \
   automake \
-  libressl \
-  build-base
+  build-essential
 
-ENV BERKELEYDB_VERSION=db-4.8.30.NC
+ENV BERKELEYDB_VERSION=db-${VERSION}.NC
 ENV BERKELEYDB_PREFIX=/opt/${BERKELEYDB_VERSION}
 
 RUN wget https://download.oracle.com/berkeley-db/${BERKELEYDB_VERSION}.tar.gz
 RUN tar -xzf *.tar.gz
-RUN sed s/__atomic_compare_exchange/__atomic_compare_exchange_db/g -i ${BERKELEYDB_VERSION}/dbinc/atomic.h
+
+RUN if [ "${VERSION}" = "4.8.30" ]; then \
+  sed s/__atomic_compare_exchange/__atomic_compare_exchange_db/g -i ${BERKELEYDB_VERSION}/dbinc/atomic.h ; else \
+  sed s/__atomic_compare_exchange/__atomic_compare_exchange_db/g -i ${BERKELEYDB_VERSION}/src/dbinc/atomic.h ; fi
+
 RUN mkdir -p ${BERKELEYDB_PREFIX}
 
 WORKDIR /${BERKELEYDB_VERSION}/build_unix
 
 RUN ../dist/configure --enable-cxx --disable-shared --with-pic --prefix=${BERKELEYDB_PREFIX}
-RUN make -j4
+RUN make -j$(nproc)
 RUN make install
-RUN rm -rf ${BERKELEYDB_PREFIX}/docs
 
 # Assemble the final image
-FROM alpine:3.9
+FROM ubuntu:${UBUNTU_VERSION}
 
 COPY --from=berkeley-db /opt /opt

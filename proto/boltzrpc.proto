@@ -6,58 +6,29 @@ service Boltz {
   /* Gets general information about this Boltz instance and the nodes it is connected to */
   rpc GetInfo (GetInfoRequest) returns (GetInfoResponse);
 
-  /* Gets the balance for either all wallets or just a single one if specified */
+  /* Gets the balance of all wallets */
   rpc GetBalance (GetBalanceRequest) returns (GetBalanceResponse);
 
-  /* Gets a new address of a specified wallet. The "type" parameter is optional and defaults to "OutputType.LEGACY" */
-  rpc NewAddress (NewAddressRequest) returns (NewAddressResponse);
+  /* Derives a keypair from the index of an HD wallet */
+  rpc DeriveKeys (DeriveKeysRequest) returns (DeriveKeysResponse);
 
-  /* Gets a hex encoded transaction from a transaction hash on the specified network */
-  rpc GetTransaction (GetTransactionRequest) returns (GetTransactionResponse);
+  /* Gets an address of a specified wallet */
+  rpc GetAddress (GetAddressRequest) returns (GetAddressResponse);
 
-  /* Gets a fee estimation in satoshis per vbyte for either all currencies or just a single one if specified */ 
-  rpc GetFeeEstimation (GetFeeEstimationRequest) returns (GetFeeEstimationResponse);
-
-  /* Broadcasts a hex encoded transaction on the specified network */
-  rpc BroadcastTransaction (BroadcastTransactionRequest) returns (BroadcastTransactionResponse);
-
-  /* Adds an entry to the list of addresses SubscribeTransactions listens to */
-  rpc ListenOnAddress (ListenOnAddressRequest) returns (ListenOnAddressResponse);
-
-  /* Subscribes to a stream of confirmed transactions to addresses that were specified with "ListenOnAddress" */
-  rpc SubscribeTransactions (SubscribeTransactionsRequest) returns (stream SubscribeTransactionsResponse);
-
-  /* Subscribes to a stream of invoice events */
-  rpc SubscribeInvoices (SubscribeInvoicesRequest) returns (stream SubscribeInvoicesResponse);
-
-  /* Subscribes to a stream of lockup transactions that Boltz refunds */
-  rpc SubscribeRefunds (SubscribeRefundsRequest) returns (stream SubscribeRefundsResponse);
-
-  /* Creates a new Swap from the chain to Lightning */
-  rpc CreateSwap (CreateSwapRequest) returns (CreateSwapResponse);
-
-  /* Creates a new Swap from Lightning to the chain */
-  rpc CreateReverseSwap (CreateReverseSwapRequest) returns (CreateReverseSwapResponse);
-
-  /* Sends coins to a specified address */
+  /* Sends onchain coins to a specified address */
   rpc SendCoins (SendCoinsRequest) returns (SendCoinsResponse);
+
+  /* Updates the timeout block delta of a pair */
+  rpc UpdateTimeoutBlockDelta (UpdateTimeoutBlockDeltaRequest) returns (UpdateTimeoutBlockDeltaResponse);
+
+  /* Adds a new referral ID to the database */
+  rpc AddReferral (AddReferralRequest) returns (AddReferralResponse);
 }
 
 enum OutputType {
   BECH32 = 0;
   COMPATIBILITY = 1;
   LEGACY = 2;
-}
-
-enum OrderSide {
-  BUY = 0;
-  SELL = 1;
-}
-
-enum InvoiceEvent {
-  PAID = 0;
-  FAILED_TO_PAY = 1;
-  SETTLED = 2;
 }
 
 message GetInfoRequest {}
@@ -73,9 +44,10 @@ message CurrencyInfo {
 
 message ChainInfo {
   uint32 version = 1;
-  uint64 protocolversion = 2;
-  uint64 blocks = 3;
+  uint64 blocks = 2;
+  uint64 scanned_blocks = 3;
   uint64 connections = 4;
+
   string error = 5;
 }
 
@@ -83,6 +55,7 @@ message LndInfo {
   string version = 1;
   LndChannels lnd_channels = 2;
   uint64 block_height = 3;
+
   string error = 4;
 }
 message LndChannels {
@@ -91,126 +64,68 @@ message LndChannels {
   uint32 pending = 3;
 }
 
-message GetBalanceRequest {
-  string currency = 1;
-}
+message GetBalanceRequest {}
 message GetBalanceResponse {
   map<string, Balance> balances = 1;
 }
+
 message Balance {
   WalletBalance wallet_balance = 1;
   LightningBalance lightning_balance = 2;
+}
+message LightningBalance {
+  uint64 local_balance = 1;
+  uint64 remote_balance = 2;
 }
 message WalletBalance {
   uint64 total_balance = 1;
   uint64 confirmed_balance = 2;
   uint64 unconfirmed_balance = 3;
 }
-message LightningBalance {
-  uint64 local_balance = 1;
-  uint64 remote_balance = 2;
+
+message DeriveKeysRequest {
+  string symbol = 1;
+  uint32 index = 2;
 }
 
-message NewAddressRequest {
-  string currency = 1;
-  OutputType type = 2;
+message DeriveKeysResponse {
+  string public_key = 1;
+  string private_key = 2;
 }
-message NewAddressResponse {
+
+message GetAddressRequest {
+  string symbol = 1;
+}
+message GetAddressResponse {
   string address = 1;
 }
 
-message GetTransactionRequest {
-  string currency = 1;
-  string transaction_hash = 2;
-}
-message GetTransactionResponse {
-  string transaction_hex = 1;
-}
-
-message GetFeeEstimationRequest {
-  string currency = 1;
-  uint64 blocks = 2; 
-}
-message GetFeeEstimationResponse {
-  map<string, uint32> fees = 1;
-}
-
-message BroadcastTransactionRequest {
-  string currency = 1;
-  string transaction_hex = 2;
-}
-message BroadcastTransactionResponse {
-  string transaction_hash = 1;
-}
-
-message ListenOnAddressRequest {
-  string currency = 1;
-  string address = 2;
-}
-message ListenOnAddressResponse {}
-
-message SubscribeTransactionsRequest {}
-message SubscribeTransactionsResponse {
-  string transaction_hash = 1;
-  string output_address = 2;
-}
-
-message SubscribeInvoicesRequest {}
-message SubscribeInvoicesResponse {
-  InvoiceEvent event = 1;
-  string invoice = 2;
-  string preimage = 3;
-}
-
-message SubscribeRefundsRequest {}
-message SubscribeRefundsResponse {
-  string lockup_transaction_hash = 1;
-}
-
-message CreateSwapRequest {
-  string base_currency = 1;
-  string quote_currency = 2;
-  OrderSide order_side = 3;
-  float rate = 4;
-  uint64 fee = 5;
-  string invoice = 6;
-  string refund_public_key = 7;
-  OutputType output_type = 8;
-  uint64 timeout_block_number = 9;
-}
-message CreateSwapResponse {
-  string redeem_script = 1;
-  uint64 timeout_block_height = 2;
-  string address = 3;
-  uint64 expected_amount = 4;
-}
-
-message CreateReverseSwapRequest {
-  string base_currency = 1;
-  string quote_currency = 2;
-  OrderSide order_side = 3;
-  float rate = 4;
-  uint64 fee = 5;
-  string claim_public_key = 6;
-  // Amount of the invoice that will be returned
-  uint64 amount = 7;
-  uint64 timeout_block_number = 8;
-}
-message CreateReverseSwapResponse {
-  string invoice = 1;
-  string redeem_script = 2;
-  string lockup_address = 3;
-  string lockup_transaction = 4;
-  string lockup_transaction_hash = 5;
-}
-
 message SendCoinsRequest {
-  string currency = 1;
+  string symbol = 1;
   string address = 2;
   uint64 amount = 3;
-  uint32 sat_per_vbyte = 4;
+
+  // sat/vbyte for UTXO based chains or gas price in GWEI for account based ones
+  uint32 fee = 4;
+  bool send_all = 5;
 }
 message SendCoinsResponse {
-  string transaction_hash = 1;
+  string transaction_id = 1;
   uint32 vout = 2;
+}
+
+message UpdateTimeoutBlockDeltaRequest {
+  string pair = 1;
+  uint32 new_delta = 2;
+}
+message UpdateTimeoutBlockDeltaResponse {}
+
+message AddReferralRequest {
+  string id = 1;
+  uint32 fee_share = 2;
+  string routing_node = 3;
+}
+message AddReferralResponse {
+  string api_key = 1;
+  string api_secret = 2;
 }

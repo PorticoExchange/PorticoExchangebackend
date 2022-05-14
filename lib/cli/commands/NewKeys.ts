@@ -1,26 +1,17 @@
-import { Arguments } from 'yargs';
 import { ECPair } from 'bitcoinjs-lib';
-import { getNetwork } from '../Utils';
-import { getHexString } from '../../Utils';
-import { printResponse } from '../Command';
+import { getHexString, stringify } from '../../Utils';
 
-export const command = 'newkeys <network>';
+export const command = 'newkeys';
 
-export const describe = 'gets new keys for the specified network';
+export const describe = 'generates a new keypair';
 
-export const builder = {
-  network: {
-    describe: 'network for the keys',
-    type: 'string',
-  },
-};
+export const builder = {};
 
-export const handler = (argv: Arguments<any>) => {
-  const network = getNetwork(argv.network);
-  const keys = ECPair.makeRandom({ network });
+export const handler = (): void => {
+  const keys = ECPair.makeRandom({});
 
-  printResponse({
+  console.log(stringify({
     publicKey: getHexString(keys.publicKey),
-    privateKey: getHexString(keys.privateKey),
-  });
+    privateKey: getHexString(keys.privateKey as Buffer),
+  }));
 };

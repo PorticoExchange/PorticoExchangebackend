@@ -1,22 +1,16 @@
-import fs from 'fs';
-import path from 'path';
-import grpc from 'grpc';
+import { credentials } from '@grpc/grpc-js';
 import { Arguments } from 'yargs';
-import { getServiceDataDir } from '../Utils';
 import { BoltzClient } from '../proto/boltzrpc_grpc_pb';
 
 export interface GrpcResponse {
-  toObject: Function;
+  toObject: () => any;
 }
 
 export const loadBoltzClient = (argv: Arguments<any>): BoltzClient => {
-  const certPath = argv.tlscertpath ? argv.tlscertpath : path.join(getServiceDataDir('boltz'), 'tls.cert');
-  const cert = fs.readFileSync(certPath);
-
-  return new BoltzClient(`${argv.rpc.host}:${argv.rpc.port}`, grpc.credentials.createSsl(cert));
+  return new BoltzClient(`${argv.rpc.host}:${argv.rpc.port}`, credentials.createInsecure());
 };
 
-export const callback = (error: Error | null, response: GrpcResponse) => {
+export const callback = (error: Error | null, response: GrpcResponse): void => {
   if (error) {
     printError(error);
   } else {
@@ -29,10 +23,10 @@ export const callback = (error: Error | null, response: GrpcResponse) => {
   }
 };
 
-export const printResponse = (response: any) => {
+export const printResponse = (response: unknown): void => {
   console.log(JSON.stringify(response, undefined, 2));
 };
 
-export const printError = (error: Error) => {
+export const printError = (error: Error): void => {
   console.error(`${error.name}: ${error.message}`);
 };

@@ -1,48 +1,87 @@
-import { expect } from 'chai';
-import { mock } from 'ts-mockito';
-import { address, crypto } from 'bitcoinjs-lib';
-import { Networks, OutputType } from 'boltz-core';
-import bip32 from 'bip32';
-import bip39 from 'bip39';
-import Wallet from '../../../lib/wallet/Wallet';
-import ChainClient from '../../../lib/chain/ChainClient';
+import { fromSeed } from 'bip32';
+import ops from '@boltz/bitcoin-ops';
+import { Networks } from 'boltz-core';
+import { crypto, script, Transaction } from 'bitcoinjs-lib';
+import { generateMnemonic, mnemonicToSeedSync } from 'bip39';
 import Logger from '../../../lib/Logger';
+import Wallet from '../../../lib/wallet/Wallet';
 import Database from '../../../lib/db/Database';
-import UtxoRepository from '../../../lib/wallet/UtxoRepository';
-import WalletRepository from '../../../lib/wallet/WalletRepository';
-import OutputRepository from '../../../lib/wallet/OutputRepository';
-import { getPubkeyHashFunction, getHexBuffer } from '../../../lib/Utils';
+import { getHexBuffer } from '../../../lib/Utils';
+import KeyRepository from '../../../lib/db/repositories/KeyRepository';
+import { CurrencyType } from '../../../lib/consts/Enums';
+import LndWalletProvider from '../../../lib/wallet/providers/LndWalletProvider';
+import { SentTransaction, WalletBalance } from '../../../lib/wallet/providers/WalletProviderInterface';
+
+const symbol = 'BTC';
+
+const balance: WalletBalance = {
+  totalBalance: 3,
+  confirmedBalance: 1,
+  unconfirmedBalance: 2,
+};
+
+const mockGetBalance = jest.fn().mockResolvedValue(balance);
+
+const address = 'bcrt1qu5m32tnhs3wl633qcg3yae8u0mqkjkm5txrqf9';
+
+const mockGetAddress = jest.fn().mockResolvedValue(address);
+
+const sentTransaction: SentTransaction = {
+  fee: 1,
+  vout: 0,
+  transaction: {} as any as Transaction,
+  transactionId: 'b866402106a97f06f84215abf545ef3b455346fd998845731385f6cdcb12d96d',
+};
+
+const mockSendToAddress = jest.fn().mockResolvedValue(sentTransaction);
+const mockSweepWallet = jest.fn().mockResolvedValue(sentTransaction);
+
+jest.mock('../../../lib/wallet/providers/LndWalletProvider', () => {
+  return jest.fn().mockImplementation(() => {
+    return {
+      symbol,
+
+      getBalance: mockGetBalance,
+      getAddress: mockGetAddress,
+
+      sendToAddress: mockSendToAddress,
+      sweepWallet: mockSweepWallet,
+    };
+  });
+});
+
+const mockedLndWalletProvider = <jest.Mock<LndWalletProvider>>LndWalletProvider;
 
 describe('Wallet', () => {
-  const currency = 'BTC';
+  const encodeOutput = getHexBuffer('00147ca6c71979907c36d5d62f325d6d8104a8497445');
+  const encodedAddress = 'bcrt1q0jnvwxtejp7rd4wk9ue96mvpqj5yjaz9v7vte5';
 
-  const mnemonic = bip39.generateMnemonic();
-  const masterNode = bip32.fromSeed(bip39.mnemonicToSeed(mnemonic));
+  const mnemonic = generateMnemonic();
+  const masterNode = fromSeed(mnemonicToSeedSync(mnemonic));
 
   const database = new Database(Logger.disabledLogger, ':memory:');
-  const walletRepository = new WalletRepository(database.models);
-  const outputRepository = new OutputRepository(database.models);
-  const utxoRepository = new UtxoRepository(database.models);
+
+  const keyRepository = new KeyRepository();
 
   const derivationPath = 'm/0/0';
   let highestUsedIndex = 21;
 
   const network = Networks.bitcoinRegtest;
 
-  const chainClientMock = mock(ChainClient);
-  // "as any" is needed to force override a "readonly" value
-  chainClientMock['symbol' as any] = currency;
+  const walletProvider = new mockedLndWalletProvider();
 
   const wallet = new Wallet(
     Logger.disabledLogger,
-    walletRepository,
-    outputRepository,
-    utxoRepository,
-    masterNode,
+    CurrencyType.BitcoinLike,
+    walletProvider,
+  );
+
+  wallet.initKeyProvider(
     network,
-    chainClientMock,
     derivationPath,
     highestUsedIndex,
+    masterNode,
+    keyRepository,
   );
 
   const incrementIndex = () => {
@@ -53,99 +92,92 @@ describe('Wallet', () => {
     return masterNode.derivePath(`${derivationPath}/${index}`);
   };
 
-  before(async () => {
+  beforeAll(async () => {
     await database.init();
 
-    // Create the foreign constraint for the "utxos" table
-    const walletRepository = new WalletRepository(database.models);
-    await walletRepository.addWallet({
+    await keyRepository.addKeyProvider({
+      symbol,
       derivationPath,
       highestUsedIndex,
-      symbol: currency,
-      blockheight: 0,
     });
   });
 
-  it('should get correct address from index', () => {
-    const index = 1;
-
-    expect(wallet.getKeysByIndex(index)).to.be.deep.equal(getKeysByIndex(index));
+  test('should set symbol' , () => {
+    expect(wallet.symbol).toEqual(symbol);
   });
 
-  it('should get new keys', () => {
+  test('should get correct address from index', () => {
+    const index = 1;
+
+    expect(wallet.getKeysByIndex(index)).toEqual(getKeysByIndex(index));
+  });
+
+  test('should get new keys', () => {
     incrementIndex();
 
     const { keys, index } = wallet.getNewKeys();
 
-    expect(keys).to.be.deep.equal(getKeysByIndex(highestUsedIndex));
-    expect(index).to.be.equal(wallet.highestIndex);
+    expect(keys).toEqual(getKeysByIndex(highestUsedIndex));
+    expect(index).toEqual(wallet['highestUsedIndex']);
 
-    expect(wallet.highestIndex).to.be.equal(highestUsedIndex);
+    expect(wallet['highestUsedIndex']).toEqual(highestUsedIndex);
   });
 
-  it('should encode an address', () => {
-    const output = getHexBuffer('00147ca6c71979907c36d5d62f325d6d8104a8497445');
-    const address = 'bcrt1q0jnvwxtejp7rd4wk9ue96mvpqj5yjaz9v7vte5';
-
-    expect(wallet.encodeAddress(output)).to.be.equal(address);
+  test('should encode addresses', () => {
+    expect(wallet.encodeAddress(encodeOutput)).toEqual(encodedAddress);
   });
 
-  it('should get a new address', async () => {
-    incrementIndex();
+  test('should ignore OP_RETURN outputs', () => {
+    const outputScript = script.compile([
+      ops.OP_RETURN,
+      crypto.sha256(Buffer.alloc(0)),
+    ]);
 
-    const outputType = OutputType.Bech32;
-
-    const keys = getKeysByIndex(highestUsedIndex);
-    const encodeFunction = getPubkeyHashFunction(outputType);
-    const outputScript = encodeFunction(crypto.hash160(keys.publicKey)) as Buffer;
-    const outputAddress = address.fromOutputScript(outputScript, network);
-
-    expect(await wallet.getNewAddress(outputType)).to.be.equal(outputAddress);
+    expect(wallet.encodeAddress(outputScript)).toEqual('');
   });
 
-  it('should get correct balance', async () => {
-    const expectedBalance = {
-      confirmedBalance: 0,
-      unconfirmedBalance: 0,
-      totalBalance: 0,
-    };
-
-    const { id } = await outputRepository.addOutput({
-      script: '',
-      currency: 'BTC',
-      keyIndex: 0,
-      type: 0,
-    });
-
-    for (let i = 0; i <= 10; i += 1) {
-      const confirmed = i % 2 === 0;
-      const value = Math.floor(Math.random() * 1000000) + 1;
-
-      await utxoRepository.addUtxo({
-        value,
-        confirmed,
-        vout: 0,
-        spent: false,
-        outputId: id,
-        currency: 'BTC',
-        txHash: `${value}`,
-      });
-
-      if (confirmed) {
-        expectedBalance.confirmedBalance += value;
-      } else {
-        expectedBalance.unconfirmedBalance += value;
-      }
-
-      expectedBalance.totalBalance += value;
-    }
-
-    expect(await wallet.getBalance()).to.be.deep.equal(expectedBalance);
+  test('should decode addresses', () => {
+    expect(wallet.decodeAddress(encodedAddress)).toEqual(encodeOutput);
   });
 
-  it('should update highest used index in database', async () => {
-    const dbWallet = await walletRepository.getWallet(currency);
+  test('should update highest used index in database', async () => {
+    const dbKeyProvider = await keyRepository.getKeyProvider(symbol);
 
-    expect(dbWallet!.highestUsedIndex).to.be.equal(highestUsedIndex);
+    expect(dbKeyProvider!.highestUsedIndex).toEqual(highestUsedIndex);
+  });
+
+  test('should get a new address', async () => {
+    expect(await wallet.getAddress()).toEqual(address);
+
+    expect(mockGetAddress).toHaveBeenCalledTimes(1);
+  });
+
+  test('should get correct balance', async () => {
+    expect(await wallet.getBalance()).toEqual(balance);
+
+    expect(mockGetBalance).toHaveBeenCalledTimes(1);
+  });
+
+  test('should send coins to address', async () => {
+    const address = '2N94uHZqzv6q5UeFjgKcG6iqeyz1UJNq9Ye';
+    const amount = 372498;
+    const satPerVbyte = 18;
+
+    expect(await wallet.sendToAddress(address, amount, satPerVbyte)).toEqual(sentTransaction);
+
+    expect(mockSendToAddress).toHaveBeenCalledTimes(1);
+  });
+
+  test('should sweep wallet', async () => {
+    const address = 'bcrt1qk4pces7y5csg3qv8gr4ftghgp8gzgg3lv3nwju';
+    const satPerVbyte = 2;
+
+    expect(await wallet.sweepWallet(address, satPerVbyte)).toEqual(sentTransaction);
+
+    expect(mockSweepWallet).toHaveBeenCalledTimes(1);
+  });
+
+  afterAll(async () => {
+    await database.close();
   });
 });

@@ -1,29 +1,36 @@
 import http from 'http';
-
-type RpcConfig = {
-  host: string;
-  port: number;
-  rpcuser: string;
-  rpcpass: string;
-};
+import { existsSync, readFileSync } from 'fs';
+import Errors from './Errors';
+import { ChainConfig } from '../Config';
 
 class RpcClient {
-  private auth: string;
+  private readonly auth: string;
+  private readonly options = {};
 
-  private options = {};
-
-  constructor(config: RpcConfig) {
-    this.auth = Buffer.from(`${config.rpcuser}:${config.rpcpass}`).toString('base64');
-
+  constructor(config: ChainConfig) {
     this.options = {
       host: config.host,
       port: config.port,
       path: '/',
       method: 'POST',
     };
+
+    // If a cookie is configured, it will be preferred
+    if (config.cookie && config.cookie !== '') {
+      if (!existsSync(config.cookie)) {
+        throw Errors.INVALID_COOKIE_FILE(config.cookie);
+      }
+
+      const cookieFile = readFileSync(config.cookie, 'utf-8').trim();
+      this.auth = Buffer.from(cookieFile).toString('base64');
+    } else if (config.user && config.password) {
+      this.auth = Buffer.from(`${config.user}:${config.password}`).toString('base64');
+    } else {
+      throw Errors.NO_AUTHENTICATION();
+    }
   }
 
-  public request = <T>(method: string, params?: any[]) => {
+  public request = <T>(method: string, params?: any[]): Promise<T> => {
     return new Promise<T>((resolve, reject) => {
       const serializedRequest = JSON.stringify({
         method,
@@ -40,10 +47,12 @@ class RpcClient {
         response.on('end', () => {
           if (response.statusCode === 401) {
             reject('401 unauthorized');
+            return;
           }
 
           if (response.statusCode === 403) {
             reject('403 forbidden');
+            return;
           }
 
           const parsedResponse = JSON.parse(buffer);
@@ -70,4 +79,3 @@ class RpcClient {
 }
 
 export default RpcClient;
-export { RpcConfig };
